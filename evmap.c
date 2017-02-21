@@ -266,7 +266,9 @@ int
 evmap_io_add_(struct event_base *base, evutil_socket_t fd, struct event *ev)
 {
 	const struct eventop *evsel = base->evsel;
+	//mapping fd to event
 	struct event_io_map *io = &base->io;
+	//entry for evmap_io , and evmap_io = evmap_signal
 	struct evmap_io *ctx = NULL;
 	int nread, nwrite, nclose, retval = 0;
 	short res = 0, old = 0;

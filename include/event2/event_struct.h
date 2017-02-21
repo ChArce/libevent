@@ -119,17 +119,21 @@ struct event_callback {
 	void *evcb_arg;
 };
 
+//LibEvent use min_heap to manage timeout events.
 struct event_base;
 struct event {
 	struct event_callback ev_evcallback;
 
 	/* for managing timeouts */
 	union {
-		TAILQ_ENTRY(event) ev_next_with_common_timeout;
-		int min_heap_idx;
+		TAILQ_ENTRY(event) ev_next_with_common_timeout; // a struct has a tqe_next pointer to point the next element and a tqe_prev pointer to indicate the address of the previous element
+		int min_heap_idx; //index in min_heap 
 	} ev_timeout_pos;
+	
+	//it is a binded file descriptor for I/O event; and it is a binded signal for signal event.
 	evutil_socket_t ev_fd;
 
+	//the event_base associated with this event
 	struct event_base *ev_base;
 
 	union {

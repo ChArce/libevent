@@ -565,6 +565,7 @@ struct event_base *
 event_base_new_with_config(const struct event_config *cfg)
 {
 	int i;
+	//Reactor Mode
 	struct event_base *base;
 	int should_check_environment;
 
@@ -572,6 +573,7 @@ event_base_new_with_config(const struct event_config *cfg)
 	event_debug_mode_too_late = 1;
 #endif
 
+	//mm_calloc(count, size)
 	if ((base = mm_calloc(1, sizeof(struct event_base))) == NULL) {
 		event_warn("%s: calloc", __func__);
 		return NULL;
@@ -598,6 +600,7 @@ event_base_new_with_config(const struct event_config *cfg)
 		gettime(base, &tmp);
 	}
 
+	//init the minor heap
 	min_heap_ctor_(&base->timeheap);
 
 	base->sig.ev_signal_pair[0] = -1;
@@ -647,8 +650,10 @@ event_base_new_with_config(const struct event_config *cfg)
 		    event_is_method_disabled(eventops[i]->name))
 			continue;
 
+		//choose event method, such as epoll
 		base->evsel = eventops[i];
 
+		//call epoll init
 		base->evbase = base->evsel->init(base);
 	}
 
@@ -664,6 +669,7 @@ event_base_new_with_config(const struct event_config *cfg)
 		event_msgx("libevent using: %s", base->evsel->name);
 
 	/* allocate a single active event queue */
+	//here just has one priority
 	if (event_base_priority_init(base, 1) < 0) {
 		event_base_free(base);
 		return NULL;
@@ -1886,6 +1892,7 @@ event_base_loop(struct event_base *base, int flags)
 	 * as we invoke user callbacks. */
 	EVBASE_ACQUIRE_LOCK(base, th_base_lock);
 
+	//the flag to check if we're running the event_base_loop or not.
 	if (base->running_loop) {
 		event_warnx("%s: reentrant invocation.  Only one event_base_loop"
 		    " can run on each event_base at once.", __func__);
@@ -1895,6 +1902,7 @@ event_base_loop(struct event_base *base, int flags)
 
 	base->running_loop = 1;
 
+	//clear time cache
 	clear_time_cache(base);
 
 	if (base->sig.ev_signal_added && base->sig.ev_n_signals_added)
@@ -1912,6 +1920,7 @@ event_base_loop(struct event_base *base, int flags)
 		base->event_continue = 0;
 		base->n_deferreds_queued = 0;
 
+		//event_gotterm and event_break are flags to indicate we should terminate the loop
 		/* Terminate the loop if we have been asked to */
 		if (base->event_gotterm) {
 			break;
@@ -1923,6 +1932,7 @@ event_base_loop(struct event_base *base, int flags)
 
 		tv_p = &tv;
 		if (!N_ACTIVE_CALLBACKS(base) && !(flags & EVLOOP_NONBLOCK)) {
+			//if there is no active events, so get the minor waiting-time to epoll_wait's args
 			timeout_next(base, &tv_p);
 		} else {
 			/*
@@ -1933,6 +1943,8 @@ event_base_loop(struct event_base *base, int flags)
 		}
 
 		/* If we have no events, we just exit */
+		//event_base current has no watching events or has no active events,
+		//meanwhile, it should not set EVLOOP_NO_EXIT_EMPTY flag.
 		if (0==(flags&EVLOOP_NO_EXIT_ON_EMPTY) &&
 		    !event_haveevents(base) && !N_ACTIVE_CALLBACKS(base)) {
 			event_debug(("%s: no events registered.", __func__));
@@ -1944,6 +1956,7 @@ event_base_loop(struct event_base *base, int flags)
 
 		clear_time_cache(base);
 
+		//use epoll_wait to wait events, here just deal with I/O events, the signal events will be processed in evsignal_process()
 		res = evsel->dispatch(base, tv_p);
 
 		if (res == -1) {
@@ -1953,11 +1966,14 @@ event_base_loop(struct event_base *base, int flags)
 			goto done;
 		}
 
+		//update the time in cache, so we donot call sys_call to get time.
 		update_time_cache(base);
 
+		//process timeout events
 		timeout_process(base);
 
 		if (N_ACTIVE_CALLBACKS(base)) {
+			//process active events queue
 			int n = event_process_active(base);
 			if ((flags & EVLOOP_ONCE)
 			    && N_ACTIVE_CALLBACKS(base) == 0
@@ -2064,6 +2080,7 @@ event_base_once(struct event_base *base, evutil_socket_t fd, short events,
 int
 event_assign(struct event *ev, struct event_base *base, evutil_socket_t fd, short events, void (*callback)(evutil_socket_t, short, void *), void *arg)
 {
+	//take the current event_base
 	if (!base)
 		base = current_base;
 	if (arg == &event_self_cbarg_ptr_)
@@ -2082,15 +2099,22 @@ event_assign(struct event *ev, struct event_base *base, evutil_socket_t fd, shor
 	ev->ev_ncalls = 0;
 	ev->ev_pncalls = NULL;
 
+	//if the event to be assigned is EV_SIAGNAL type
 	if (events & EV_SIGNAL) {
+		//EV_SIGNAL, detect read, write or connection closed event
 		if ((events & (EV_READ|EV_WRITE|EV_CLOSED)) != 0) {
 			event_warnx("%s: EV_SIGNAL is not compatible with "
 			    "EV_READ, EV_WRITE or EV_CLOSED", __func__);
 			return -1;
 		}
+		//a signal event. and will call evcb_callback in event_callback
 		ev->ev_closure = EV_CLOSURE_EVENT_SIGNAL;
 	} else {
+		//is not EV_SIGNAL, such as EVENT_TIMEOUT
 		if (events & EV_PERSIST) {
+			//persisent event, we will not remove the event when it activated, if it is TIMEOUT type. the timeout will reset to 0 !!
+			// why here should clear ev_.ev_io.ev_timeout?????
+			// persisent event only can be io or signal event , and the if branch has processed signal type.??
 			evutil_timerclear(&ev->ev_io_timeout);
 			ev->ev_closure = EV_CLOSURE_EVENT_PERSIST;
 		} else {
@@ -2098,10 +2122,12 @@ event_assign(struct event *ev, struct event_base *base, evutil_socket_t fd, shor
 		}
 	}
 
+	//init min_heap_idx to -1
 	min_heap_elem_init_(ev);
 
 	if (base != NULL) {
 		/* by default, we put new events into the middle priority */
+		//the default priority is the half of highest priority
 		ev->ev_pri = base->nactivequeues / 2;
 	}
 
@@ -2561,6 +2587,7 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 		 ev->ev_events & EV_READ ? "EV_READ " : " ",
 		 ev->ev_events & EV_WRITE ? "EV_WRITE " : " ",
 		 ev->ev_events & EV_CLOSED ? "EV_CLOSED " : " ",
+		 //why here check EV_TIMEOUT by timeval, why not ev->ev_events & EV_TIMEOUT
 		 tv ? "EV_TIMEOUT " : " ",
 		 ev->ev_callback));
 
@@ -2571,10 +2598,13 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 		return (-1);
 	}
 
+	// what for EVLIST_TIMEOUT , EVLIST_FINALIZING meanning??????????????
+
 	/*
 	 * prepare for timeout insertion further below, if we get a
 	 * failure on any step, we should not change any state.
 	 */
+	//if the event is TIMEOUT event, the we should allocate enough space for minor heap
 	if (tv != NULL && !(ev->ev_flags & EVLIST_TIMEOUT)) {
 		if (min_heap_reserve_(&base->timeheap,
 			1 + min_heap_size_(&base->timeheap)) == -1)
@@ -2594,13 +2624,17 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 	}
 #endif
 
+	//is a SIGANL or TIMEOUT event, and is not in INSERTED or ACTIVE list, so we should register this event. 
 	if ((ev->ev_events & (EV_READ|EV_WRITE|EV_CLOSED|EV_SIGNAL)) &&
 	    !(ev->ev_flags & (EVLIST_INSERTED|EVLIST_ACTIVE|EVLIST_ACTIVE_LATER))) {
 		if (ev->ev_events & (EV_READ|EV_WRITE|EV_CLOSED))
+			//io evevt
 			res = evmap_io_add_(base, ev->ev_fd, ev);
 		else if (ev->ev_events & EV_SIGNAL)
+			//signal event
 			res = evmap_signal_add_(base, (int)ev->ev_fd, ev);
 		if (res != -1)
+			//insert event to queue, it actually change the ev_flags | EVLIST_INSERTED
 			event_queue_insert_inserted(base, ev);
 		if (res == 1) {
 			/* evmap says we need to notify the main thread. */
@@ -3310,6 +3344,7 @@ insert_common_timeout_inorder(struct common_timeout_list *ctl,
 static void
 event_queue_insert_inserted(struct event_base *base, struct event *ev)
 {
+	//just change the flag |EVLIST_INSERTED??
 	EVENT_BASE_ASSERT_LOCKED(base);
 
 	if (EVUTIL_FAILURE_CHECK(ev->ev_flags & EVLIST_INSERTED)) {

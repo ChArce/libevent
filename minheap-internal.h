@@ -132,11 +132,14 @@ int min_heap_adjust_(min_heap_t *s, struct event *e)
 
 int min_heap_reserve_(min_heap_t* s, unsigned n)
 {
+	//check current allocate space is enough for n.
 	if (s->a < n)
 	{
+		// current allocate space is not enough, if add the first element, the default allocate space is 8, otherwise we should allocate the space twice than current.
 		struct event** p;
 		unsigned a = s->a ? s->a * 2 : 8;
 		if (a < n)
+			//less than needed, than direct allocate n..
 			a = n;
 		if (!(p = (struct event**)mm_realloc(s->p, a * sizeof *p)))
 			return -1;
